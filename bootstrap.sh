@@ -9,7 +9,14 @@ mkdir -p "$VOL" "$PM" "$SITE" /runpod-volume/hf /runpod-volume/tmp
 exec > >(tee -a "$LOG") 2>&1
 echo "=== bootstrap $(date -u +%FT%TZ) model=$MODEL host=$(hostname) gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null)"
 export HF_HOME=/runpod-volume/hf TMPDIR=/runpod-volume/tmp PYTHONPATH="$SITE:${PYTHONPATH:-}" PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
-command -v ffmpeg >/dev/null || { apt-get update -qq && apt-get install -y -qq ffmpeg git; } || echo "[bootstrap] apt failed (continuing)"
+# apt is not usable in the serverless container: static ffmpeg on the volume instead (once)
+export PATH="$VOL/bin:$PATH"
+if [ ! -x "$VOL/bin/ffmpeg" ]; then
+  echo "[bootstrap] fetching static ffmpeg"; mkdir -p "$VOL/bin" /tmp/ff && curl -sfL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o /tmp/ff/ff.tar.xz \
+    && tar -xJf /tmp/ff/ff.tar.xz -C /tmp/ff && cp /tmp/ff/ffmpeg-*-static/ffmpeg /tmp/ff/ffmpeg-*-static/ffprobe "$VOL/bin/" && chmod +x "$VOL/bin/ffmpeg" "$VOL/bin/ffprobe" \
+    || { echo "[bootstrap] static ffmpeg failed — trying imageio-ffmpeg"; pip install --target "$SITE" imageio-ffmpeg 2>&1 | tail -1; python -c "import imageio_ffmpeg,shutil; shutil.copy(imageio_ffmpeg.get_ffmpeg_exe(), '$VOL/bin/ffmpeg')" && chmod +x "$VOL/bin/ffmpeg"; }
+fi
+command -v git >/dev/null || echo "[bootstrap] WARNING: git missing"
 
 if [ ! -d "$SRC/.git" ]; then git clone --depth 1 https://github.com/Omni-Avatar/OmniAvatar.git "$SRC" || { echo "[bootstrap] clone failed"; sleep 30; exit 1; }; fi
 if [ ! -f "$SITE/.deps-ok" ]; then

@@ -10,8 +10,10 @@ Input (event["input"]):
     overlap_frame    1 | 13 (13) · tea_cache_l1_thresh (0.10) · seed (42)
 Output: video_b64 (mp4, 480p, 25 fps), seconds, model
 """
-import base64, glob, os, subprocess, time, uuid
+import base64, glob, os, shutil, subprocess, time, uuid
 import runpod
+FFMPEG = shutil.which("ffmpeg") or "/runpod-volume/omniavatar/bin/ffmpeg"     # apt is unavailable here; bootstrap puts a static build on the volume
+os.environ["PATH"] = "/runpod-volume/omniavatar/bin:" + os.environ.get("PATH", "")
 
 SRC = "/runpod-volume/omniavatar/src"; MODEL = os.environ.get("OMNIAVATAR_MODEL", "1.3B")
 CFG = "configs/inference_1.3B.yaml" if MODEL == "1.3B" else "configs/inference.yaml"
@@ -28,7 +30,7 @@ def run(job):
     jid = uuid.uuid4().hex[:8]; work = f"/runpod-volume/tmp/{jid}"; os.makedirs(work, exist_ok=True)
     img, wav = f"{work}/ref.png", f"{work}/vo.wav"
     open(img, "wb").write(base64.b64decode(i["image_b64"])); open(wav, "wb").write(base64.b64decode(i["audio_b64"]))
-    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", wav, "-ac", "1", "-ar", "16000", f"{work}/vo16.wav"], check=True)
+    subprocess.run([FFMPEG, "-nostdin", "-loglevel", "error", "-y", "-i", wav, "-ac", "1", "-ar", "16000", f"{work}/vo16.wav"], check=True)
     prompt = (i.get("prompt") or DEFAULT_PROMPT).replace("\n", " ")
     open(f"{work}/samples.txt", "w").write(f"{prompt}@@{img}@@{work}/vo16.wav\n")
     hp = ",".join(f"{k}={i.get(k, d)}" for k, d in [("num_steps", 30), ("guidance_scale", 4.5), ("audio_scale", 3.0), ("max_tokens", 30000),
@@ -43,7 +45,7 @@ def run(job):
         return {"error": "no output video produced", "tail": (p.stdout or "")[-2000:]}
     out = new[-1]; muxed = f"{work}/out.mp4"
     # OmniAvatar writes video with audio; re-mux the ORIGINAL narration to be safe and normalise to h264/aac
-    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", out, "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-crf", "18",
+    subprocess.run([FFMPEG, "-nostdin", "-loglevel", "error", "-y", "-i", out, "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-crf", "18",
                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", muxed], check=True)
     data = open(muxed, "rb").read(); subprocess.run(["rm", "-rf", work])
     return {"video_b64": base64.b64encode(data).decode(), "seconds": round(time.time() - t0, 1), "model": MODEL, "hp": hp}
