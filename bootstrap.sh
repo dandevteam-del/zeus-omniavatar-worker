@@ -38,5 +38,5 @@ ln -sfn "$PM" "$SRC/pretrained_models"
 rm -rf /runpod-volume/hf/hub /runpod-volume/tmp/* 2>/dev/null; echo "[bootstrap] volume: $(df -h /runpod-volume | tail -1)"
 cd "$SRC"
 curl -sfL "https://raw.githubusercontent.com/dandevteam-del/zeus-omniavatar-worker/${BOOT_SHA:-main}/handler.py" -o /tmp/handler.py || { echo "[bootstrap] handler fetch failed"; sleep 30; exit 1; }
-python -c "import runpod, torch; print('[bootstrap] runpod', runpod.__version__, 'torch', torch.__version__, 'cuda', torch.cuda.is_available())" || { echo "[bootstrap] import check failed"; sleep 30; exit 1; }
+python -c "import runpod, torch; print('[bootstrap] runpod', runpod.__version__, 'torch', torch.__version__, torch.__file__, 'cuda', torch.cuda.is_available())" || { echo "[bootstrap] import check failed"; sleep 30; exit 1; }
 echo "[bootstrap] ready — model $MODEL — starting handler"; exec python /tmp/handler.py

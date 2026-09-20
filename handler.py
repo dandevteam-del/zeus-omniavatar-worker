@@ -54,7 +54,9 @@ def run(job):
     cmd = ["torchrun", "--standalone", "--nproc_per_node=1", "scripts/inference.py", "--config", CFG, "--input_file", f"{work}/samples.txt", f"--hp={hp}"]
     p = subprocess.run(cmd, cwd=SRC, capture_output=True, text=True)
     if p.returncode != 0:
-        return {"error": "inference failed", "tail": (p.stderr or p.stdout)[-3000:]}
+        err = p.stderr or ""; i = err.rfind("Traceback (most recent call last)", 0, err.find("ChildFailedError") if "ChildFailedError" in err else len(err))
+        block = err[i:i + 4000] if i >= 0 else err[-4000:]
+        import torch; return {"error": "inference failed", "child_traceback": block, "stdout_tail": (p.stdout or "")[-1500:], "torch": torch.__version__ + " @ " + torch.__file__, "cmd": " ".join(cmd)}
     new = sorted(set(glob.glob(f"{SRC}/**/*.mp4", recursive=True)) - before, key=os.path.getmtime)
     if not new:
         return {"error": "no output video produced", "tail": (p.stdout or "")[-2000:]}
