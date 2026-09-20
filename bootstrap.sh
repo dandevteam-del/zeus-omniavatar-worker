@@ -55,6 +55,9 @@ else dl Wan-AI/Wan2.1-T2V-1.3B "$PM/Wan2.1-T2V-1.3B" config.json; dl OmniAvatar/
 # Purge every torch-stack package from the volume so the image's torch is the one imported.
 rm -rf "$SITE"/torch "$SITE"/torch-*.dist-info "$SITE"/torchvision "$SITE"/torchvision-*.dist-info "$SITE"/torchaudio "$SITE"/torchaudio-*.dist-info \
        "$SITE"/triton "$SITE"/triton-*.dist-info "$SITE"/nvidia "$SITE"/nvidia_*.dist-info "$SITE"/functorch "$SITE"/torchgen "$SITE"/bin/torchrun 2>/dev/null
+# unpinned diffusers resolved to a release that requires peft>=0.17 while OmniAvatar pins peft==0.15.1 → pin diffusers to
+# the xfuser-0.4.1-era release. --no-deps so nothing (torch!) gets re-resolved.
+[ -f "$SITE/.diffusers-0.33.1" ] || { rm -rf "$SITE"/diffusers "$SITE"/diffusers-*.dist-info; pip install --target "$SITE" --no-deps "diffusers==0.33.1" 2>&1 | tail -1 && touch "$SITE/.diffusers-0.33.1"; }
 # the prebuilt flash_attn wheel does not match this torch build and transformers auto-imports it when present → remove it (SDPA fallback)
 rm -rf "$SITE"/flash_attn "$SITE"/flash_attn-*.dist-info "$SITE"/flash_attn_2_cuda* 2>/dev/null
 ln -sfn "$PM" "$SRC/pretrained_models"
