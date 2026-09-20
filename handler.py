@@ -55,11 +55,11 @@ def run(job):
     cmd = ["torchrun", "--standalone", "--nproc_per_node=1", "--log-dir", logd, "--redirects", "3", "--tee", "3", "scripts/inference.py", "--config", CFG, "--input_file", f"{work}/samples.txt", f"--hp={hp}"]
     p = subprocess.run(cmd, cwd=SRC, capture_output=True, text=True)
     if p.returncode != 0:
-        err = p.stderr or ""; i = err.rfind("Traceback (most recent call last)", 0, err.find("ChildFailedError") if "ChildFailedError" in err else len(err))
-        block = err[i:i + 4000] if i >= 0 else err[-4000:]
+        err = p.stderr or ""; i = err.find("Traceback (most recent call last)")          # FIRST traceback = the child's (torchrun's own comes last)
+        block = err[i:i + 5000] if i >= 0 else err[-5000:]
         import torch
-        child = "".join(f"\n--- {f} ---\n" + open(f).read()[-2500:] for f in sorted(glob.glob(f"{logd}/**/*", recursive=True)) if os.path.isfile(f) and f.endswith(("stderr", "stdout", "error.json")))
-        return {"error": "inference failed", "child_logs": child[-6000:], "child_traceback": block, "stdout_tail": (p.stdout or "")[-1500:], "torch": torch.__version__ + " @ " + torch.__file__, "cmd": " ".join(cmd)}
+        child = "".join(f"\n--- {f} ---\n" + open(f).read()[-2500:] for f in sorted(glob.glob(f"{logd}/**/*", recursive=True)) if os.path.isfile(f) and any(x in f for x in ("stderr", "stdout", "error")))
+        return {"error": "inference failed", "child_logs": child[-6000:], "child_traceback": block, "stderr_head": err[:3000], "stdout_tail": (p.stdout or "")[-1500:], "torch": torch.__version__ + " @ " + torch.__file__, "cmd": " ".join(cmd)}
     new = sorted(set(glob.glob(f"{SRC}/**/*.mp4", recursive=True)) - before, key=os.path.getmtime)
     if not new:
         return {"error": "no output video produced", "tail": (p.stdout or "")[-2000:]}
