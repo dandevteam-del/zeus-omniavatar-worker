@@ -24,7 +24,6 @@ if [ ! -f "$SITE/.deps-ok" ]; then
   # drop torch/torchvision/torchaudio pins so pip does not re-download 2.5 GB of what the image already has
   grep -viE '^(torch|torchvision|torchaudio|flash[-_]attn)' "$SRC/requirements.txt" > /tmp/req.txt || true
   pip install --target "$SITE" -r /tmp/req.txt runpod "huggingface_hub[cli]" 2>&1 | tail -5 || { echo "[bootstrap] pip failed"; sleep 30; exit 1; }
-  pip install --target "$SITE" --no-deps "https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp311-cp311-linux_x86_64.whl" 2>&1 | tail -1 || echo "[bootstrap] flash_attn wheel unavailable — continuing without"
   touch "$SITE/.deps-ok"
 fi
 HFCLI="$SITE/bin/huggingface-cli"; [ -x "$HFCLI" ] || HFCLI="python -c 'from huggingface_hub.commands.huggingface_cli import main; main()'"
@@ -32,6 +31,8 @@ dl() { [ -e "$2/$3" ] && return 0; echo "[bootstrap] downloading $1"; eval "$HFC
 dl facebook/wav2vec2-base-960h "$PM/wav2vec2-base-960h" config.json
 if [ "$MODEL" = "14B" ]; then dl Wan-AI/Wan2.1-T2V-14B "$PM/Wan2.1-T2V-14B" config.json; dl OmniAvatar/OmniAvatar-14B "$PM/OmniAvatar-14B" config.json
 else dl Wan-AI/Wan2.1-T2V-1.3B "$PM/Wan2.1-T2V-1.3B" config.json; dl OmniAvatar/OmniAvatar-1.3B "$PM/OmniAvatar-1.3B" config.json; fi
+# the prebuilt flash_attn wheel does not match this torch build and transformers auto-imports it when present → remove it (SDPA fallback)
+rm -rf "$SITE"/flash_attn "$SITE"/flash_attn-*.dist-info "$SITE"/flash_attn_2_cuda* 2>/dev/null
 ln -sfn "$PM" "$SRC/pretrained_models"
 # the HF hub cache duplicates the --local-dir weights; the 50 GB volume filled up (0-byte files, blank log). Drop it.
 rm -rf /runpod-volume/hf/hub /runpod-volume/tmp/* 2>/dev/null; echo "[bootstrap] volume: $(df -h /runpod-volume | tail -1)"
