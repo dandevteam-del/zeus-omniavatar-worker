@@ -42,7 +42,7 @@ def run(job):
     if i.get("action") == "log":
         try: return {"log": open("/tmp/bootstrap.local.log").read()[-6000:]}
         except Exception as e: return {"error": str(e)}
-    jid = uuid.uuid4().hex[:8]; work = f"/tmp/omni/{jid}"          # container disk — the network volume ran out of space; os.makedirs(work, exist_ok=True)
+    jid = uuid.uuid4().hex[:8]; work = f"/tmp/omni/{jid}"; os.makedirs(work, exist_ok=True)          # container disk — the network volume ran out of space
     img, wav = f"{work}/ref.png", f"{work}/vo.wav"
     open(img, "wb").write(base64.b64decode(i["image_b64"])); open(wav, "wb").write(base64.b64decode(i["audio_b64"]))
     subprocess.run([FFMPEG, "-nostdin", "-loglevel", "error", "-y", "-i", wav, "-ac", "1", "-ar", "16000", f"{work}/vo16.wav"], check=True)
