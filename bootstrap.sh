@@ -1,35 +1,32 @@
 #!/bin/bash
-# zeus-omniavatar-worker bootstrap — runs as the container start command on RunPod serverless.
-# Base image: runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04 (torch 2.4 cu124 = OmniAvatar's pin).
-# Everything heavy lives on the NETWORK VOLUME so cold starts after the first are fast:
-#   /runpod-volume/omniavatar/src               OmniAvatar repo
-#   /runpod-volume/omniavatar/pretrained_models  Wan2.1 base + OmniAvatar LoRA + wav2vec2
-#   /runpod-volume/omniavatar/site               pip target (deps installed once)
-set -euo pipefail
-VOL=/runpod-volume/omniavatar; SRC=$VOL/src; PM=$VOL/pretrained_models; SITE=$VOL/site
-MODEL="${OMNIAVATAR_MODEL:-1.3B}"           # 1.3B (fast, ~8-16 GB) or 14B (36 GB, quality)
+# zeus-omniavatar-worker bootstrap — container start command on RunPod serverless.
+# Base image: runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04 (torch 2.4 cu124 = OmniAvatar's pin; NOT reinstalled).
+# Heavy things live on the NETWORK VOLUME so only the first cold start is slow:
+#   /runpod-volume/omniavatar/src, /pretrained_models, /site (pip deps), /bootstrap.log (readable by a later job)
+VOL=/runpod-volume/omniavatar; SRC=$VOL/src; PM=$VOL/pretrained_models; SITE=$VOL/site; LOG=$VOL/bootstrap.log
+MODEL="${OMNIAVATAR_MODEL:-1.3B}"
 mkdir -p "$VOL" "$PM" "$SITE" /runpod-volume/hf /runpod-volume/tmp
-export HF_HOME=/runpod-volume/hf TMPDIR=/runpod-volume/tmp PYTHONPATH="$SITE:${PYTHONPATH:-}" PIP_NO_CACHE_DIR=1
-apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq ffmpeg git >/dev/null 2>&1 || true
+exec > >(tee -a "$LOG") 2>&1
+echo "=== bootstrap $(date -u +%FT%TZ) model=$MODEL host=$(hostname) gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null)"
+export HF_HOME=/runpod-volume/hf TMPDIR=/runpod-volume/tmp PYTHONPATH="$SITE:${PYTHONPATH:-}" PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
+command -v ffmpeg >/dev/null || { apt-get update -qq && apt-get install -y -qq ffmpeg git; } || echo "[bootstrap] apt failed (continuing)"
 
-[ -d "$SRC/.git" ] || git clone --depth 1 https://github.com/Omni-Avatar/OmniAvatar.git "$SRC"
+if [ ! -d "$SRC/.git" ]; then git clone --depth 1 https://github.com/Omni-Avatar/OmniAvatar.git "$SRC" || { echo "[bootstrap] clone failed"; sleep 30; exit 1; }; fi
 if [ ! -f "$SITE/.deps-ok" ]; then
-  echo "[bootstrap] installing deps into $SITE"
-  pip install --target "$SITE" --upgrade -r "$SRC/requirements.txt" runpod "huggingface_hub[cli]" 2>&1 | tail -3
-  # flash-attn: prebuilt wheel for torch2.4+cu12 py311; compiling from source takes >1 h, so a miss is non-fatal
-  pip install --target "$SITE" "https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp311-cp311-linux_x86_64.whl" 2>&1 | tail -1 || echo "[bootstrap] flash_attn wheel unavailable — continuing without"
+  echo "[bootstrap] installing deps into $SITE (torch stays from the image)"
+  # drop torch/torchvision/torchaudio pins so pip does not re-download 2.5 GB of what the image already has
+  grep -viE '^(torch|torchvision|torchaudio|flash[-_]attn)' "$SRC/requirements.txt" > /tmp/req.txt || true
+  pip install --target "$SITE" -r /tmp/req.txt runpod "huggingface_hub[cli]" 2>&1 | tail -5 || { echo "[bootstrap] pip failed"; sleep 30; exit 1; }
+  pip install --target "$SITE" --no-deps "https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp311-cp311-linux_x86_64.whl" 2>&1 | tail -1 || echo "[bootstrap] flash_attn wheel unavailable — continuing without"
   touch "$SITE/.deps-ok"
 fi
-HF="python -m huggingface_hub.commands.huggingface_cli download"
-[ -f "$PM/wav2vec2-base-960h/config.json" ] || $HF facebook/wav2vec2-base-960h --local-dir "$PM/wav2vec2-base-960h"
-if [ "$MODEL" = "14B" ]; then
-  [ -f "$PM/Wan2.1-T2V-14B/config.json" ] || $HF Wan-AI/Wan2.1-T2V-14B --local-dir "$PM/Wan2.1-T2V-14B"
-  [ -d "$PM/OmniAvatar-14B" ] || $HF OmniAvatar/OmniAvatar-14B --local-dir "$PM/OmniAvatar-14B"
-else
-  [ -f "$PM/Wan2.1-T2V-1.3B/config.json" ] || $HF Wan-AI/Wan2.1-T2V-1.3B --local-dir "$PM/Wan2.1-T2V-1.3B"
-  [ -d "$PM/OmniAvatar-1.3B" ] || $HF OmniAvatar/OmniAvatar-1.3B --local-dir "$PM/OmniAvatar-1.3B"
-fi
+HFCLI="$SITE/bin/huggingface-cli"; [ -x "$HFCLI" ] || HFCLI="python -c 'from huggingface_hub.commands.huggingface_cli import main; main()'"
+dl() { [ -e "$2/$3" ] && return 0; echo "[bootstrap] downloading $1"; eval "$HFCLI" download "$1" --local-dir "$2" 2>&1 | tail -2; }
+dl facebook/wav2vec2-base-960h "$PM/wav2vec2-base-960h" config.json
+if [ "$MODEL" = "14B" ]; then dl Wan-AI/Wan2.1-T2V-14B "$PM/Wan2.1-T2V-14B" config.json; dl OmniAvatar/OmniAvatar-14B "$PM/OmniAvatar-14B" config.json
+else dl Wan-AI/Wan2.1-T2V-1.3B "$PM/Wan2.1-T2V-1.3B" config.json; dl OmniAvatar/OmniAvatar-1.3B "$PM/OmniAvatar-1.3B" config.json; fi
 ln -sfn "$PM" "$SRC/pretrained_models"
 cd "$SRC"
-curl -sL "https://raw.githubusercontent.com/dandevteam-del/zeus-omniavatar-worker/main/handler.py" -o /tmp/handler.py || cp "$(dirname "$0")/handler.py" /tmp/handler.py
-echo "[bootstrap] ready — model $MODEL"; exec python /tmp/handler.py
+curl -sfL "https://raw.githubusercontent.com/dandevteam-del/zeus-omniavatar-worker/main/handler.py" -o /tmp/handler.py || { echo "[bootstrap] handler fetch failed"; sleep 30; exit 1; }
+python -c "import runpod, torch; print('[bootstrap] runpod', runpod.__version__, 'torch', torch.__version__, 'cuda', torch.cuda.is_available())" || { echo "[bootstrap] import check failed"; sleep 30; exit 1; }
+echo "[bootstrap] ready — model $MODEL — starting handler"; exec python /tmp/handler.py

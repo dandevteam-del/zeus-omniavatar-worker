@@ -21,7 +21,11 @@ DEFAULT_PROMPT = ("A confident instructor in a dark shirt standing in front of a
 
 
 def run(job):
-    i = job["input"]; jid = uuid.uuid4().hex[:8]; work = f"/runpod-volume/tmp/{jid}"; os.makedirs(work, exist_ok=True)
+    i = job["input"]
+    if i.get("action") == "log":
+        try: return {"log": open("/runpod-volume/omniavatar/bootstrap.log").read()[-6000:]}
+        except Exception as e: return {"error": str(e)}
+    jid = uuid.uuid4().hex[:8]; work = f"/runpod-volume/tmp/{jid}"; os.makedirs(work, exist_ok=True)
     img, wav = f"{work}/ref.png", f"{work}/vo.wav"
     open(img, "wb").write(base64.b64decode(i["image_b64"])); open(wav, "wb").write(base64.b64decode(i["audio_b64"]))
     subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", wav, "-ac", "1", "-ar", "16000", f"{work}/vo16.wav"], check=True)
