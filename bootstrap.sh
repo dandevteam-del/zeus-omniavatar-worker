@@ -31,6 +31,10 @@ dl() { [ -e "$2/$3" ] && return 0; echo "[bootstrap] downloading $1"; eval "$HFC
 dl facebook/wav2vec2-base-960h "$PM/wav2vec2-base-960h" config.json
 if [ "$MODEL" = "14B" ]; then dl Wan-AI/Wan2.1-T2V-14B "$PM/Wan2.1-T2V-14B" config.json; dl OmniAvatar/OmniAvatar-14B "$PM/OmniAvatar-14B" config.json
 else dl Wan-AI/Wan2.1-T2V-1.3B "$PM/Wan2.1-T2V-1.3B" config.json; dl OmniAvatar/OmniAvatar-1.3B "$PM/OmniAvatar-1.3B" config.json; fi
+# pip resolved a torch 2.14+cu130 into $SITE as a dependency; it shadows the image's torch 2.4/cu124 and crashes on this driver.
+# Purge every torch-stack package from the volume so the image's torch is the one imported.
+rm -rf "$SITE"/torch "$SITE"/torch-*.dist-info "$SITE"/torchvision "$SITE"/torchvision-*.dist-info "$SITE"/torchaudio "$SITE"/torchaudio-*.dist-info \
+       "$SITE"/triton "$SITE"/triton-*.dist-info "$SITE"/nvidia "$SITE"/nvidia_*.dist-info "$SITE"/functorch "$SITE"/torchgen "$SITE"/bin/torchrun 2>/dev/null
 # the prebuilt flash_attn wheel does not match this torch build and transformers auto-imports it when present → remove it (SDPA fallback)
 rm -rf "$SITE"/flash_attn "$SITE"/flash_attn-*.dist-info "$SITE"/flash_attn_2_cuda* 2>/dev/null
 ln -sfn "$PM" "$SRC/pretrained_models"

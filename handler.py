@@ -51,12 +51,15 @@ def run(job):
     hp = ",".join(f"{k}={i.get(k, d)}" for k, d in [("num_steps", 30), ("guidance_scale", 4.5), ("audio_scale", 3.0), ("max_tokens", 30000),
                                                       ("overlap_frame", 13), ("tea_cache_l1_thresh", 0.10), ("seed", 42)])
     before = set(glob.glob(f"{SRC}/**/*.mp4", recursive=True)); t0 = time.time()
-    cmd = ["torchrun", "--standalone", "--nproc_per_node=1", "scripts/inference.py", "--config", CFG, "--input_file", f"{work}/samples.txt", f"--hp={hp}"]
+    logd = f"{work}/logs"
+    cmd = ["torchrun", "--standalone", "--nproc_per_node=1", "--log-dir", logd, "--redirects", "3", "--tee", "3", "scripts/inference.py", "--config", CFG, "--input_file", f"{work}/samples.txt", f"--hp={hp}"]
     p = subprocess.run(cmd, cwd=SRC, capture_output=True, text=True)
     if p.returncode != 0:
         err = p.stderr or ""; i = err.rfind("Traceback (most recent call last)", 0, err.find("ChildFailedError") if "ChildFailedError" in err else len(err))
         block = err[i:i + 4000] if i >= 0 else err[-4000:]
-        import torch; return {"error": "inference failed", "child_traceback": block, "stdout_tail": (p.stdout or "")[-1500:], "torch": torch.__version__ + " @ " + torch.__file__, "cmd": " ".join(cmd)}
+        import torch
+        child = "".join(f"\n--- {f} ---\n" + open(f).read()[-2500:] for f in sorted(glob.glob(f"{logd}/**/*", recursive=True)) if os.path.isfile(f) and f.endswith(("stderr", "stdout", "error.json")))
+        return {"error": "inference failed", "child_logs": child[-6000:], "child_traceback": block, "stdout_tail": (p.stdout or "")[-1500:], "torch": torch.__version__ + " @ " + torch.__file__, "cmd": " ".join(cmd)}
     new = sorted(set(glob.glob(f"{SRC}/**/*.mp4", recursive=True)) - before, key=os.path.getmtime)
     if not new:
         return {"error": "no output video produced", "tail": (p.stdout or "")[-2000:]}
