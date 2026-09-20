@@ -26,8 +26,28 @@ if [ ! -f "$SITE/.deps-ok" ]; then
   pip install --target "$SITE" -r /tmp/req.txt runpod "huggingface_hub[cli]" 2>&1 | tail -5 || { echo "[bootstrap] pip failed"; sleep 30; exit 1; }
   touch "$SITE/.deps-ok"
 fi
+# integrity pass: files written while the volume was full came out NUL-filled (config.json was). Delete anything that
+# does not parse / has no magic, so the downloads below refetch only those.
+python - <<'PY'
+import os, json, struct, sys
+root = "/runpod-volume/omniavatar/pretrained_models"; bad = []
+for d, _, fs in os.walk(root):
+    for f in fs:
+        p = os.path.join(d, f); ok = True
+        try:
+            if os.path.getsize(p) == 0: ok = False
+            elif f.endswith((".json", ".txt", ".yaml", ".yml", ".md")): open(p, "rb").read(1024).decode("utf-8"); ok = b"\x00" not in open(p, "rb").read(4096)
+            elif f.endswith(".safetensors"):
+                with open(p, "rb") as fh: n = struct.unpack("<Q", fh.read(8))[0]; ok = 0 < n < 100_000_000 and json.loads(fh.read(n)) is not None
+            elif f.endswith((".pt", ".pth", ".bin")): ok = open(p, "rb").read(2) == b"PK"
+        except Exception: ok = False
+        if not ok: bad.append(p)
+for p in bad: print("[bootstrap] corrupt → refetch:", p); os.remove(p)
+print(f"[bootstrap] integrity: {len(bad)} bad file(s) removed")
+PY
 HFCLI="$SITE/bin/huggingface-cli"; [ -x "$HFCLI" ] || HFCLI="python -c 'from huggingface_hub.commands.huggingface_cli import main; main()'"
-dl() { [ -e "$2/$3" ] && return 0; echo "[bootstrap] downloading $1"; eval "$HFCLI" download "$1" --local-dir "$2" 2>&1 | tail -2; }
+dl() { [ -e "$2/$3" ] && [ -z "$(find "$2" -name '*.incomplete' 2>/dev/null | head -1)" ] && [ "${FORCE_DL:-0}" = 0 ] && return 0; echo "[bootstrap] downloading/repairing $1"; eval "$HFCLI" download "$1" --local-dir "$2" 2>&1 | tail -2; }
+export FORCE_DL=1   # after the integrity pass, always let hf verify each repo (it skips files that are already complete)
 dl facebook/wav2vec2-base-960h "$PM/wav2vec2-base-960h" config.json
 if [ "$MODEL" = "14B" ]; then dl Wan-AI/Wan2.1-T2V-14B "$PM/Wan2.1-T2V-14B" config.json; dl OmniAvatar/OmniAvatar-14B "$PM/OmniAvatar-14B" config.json
 else dl Wan-AI/Wan2.1-T2V-1.3B "$PM/Wan2.1-T2V-1.3B" config.json; dl OmniAvatar/OmniAvatar-1.3B "$PM/OmniAvatar-1.3B" config.json; fi
