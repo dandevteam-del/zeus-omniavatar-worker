@@ -9,13 +9,21 @@ mkdir -p "$VOL" "$PM" "$SITE" /runpod-volume/hf /runpod-volume/tmp
 exec > >(tee -a "$LOG") 2>&1
 echo "=== bootstrap $(date -u +%FT%TZ) model=$MODEL host=$(hostname) gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null)"
 export HF_HOME=/runpod-volume/hf TMPDIR=/runpod-volume/tmp PYTHONPATH="$SITE:${PYTHONPATH:-}" PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
-# apt is not usable in the serverless container: static ffmpeg on the volume instead (once)
-export PATH="$VOL/bin:$PATH"
-if [ ! -x "$VOL/bin/ffmpeg" ]; then
-  echo "[bootstrap] fetching static ffmpeg"; mkdir -p "$VOL/bin" /tmp/ff && curl -sfL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o /tmp/ff/ff.tar.xz \
-    && tar -xJf /tmp/ff/ff.tar.xz -C /tmp/ff && cp /tmp/ff/ffmpeg-*-static/ffmpeg /tmp/ff/ffmpeg-*-static/ffprobe "$VOL/bin/" && chmod +x "$VOL/bin/ffmpeg" "$VOL/bin/ffprobe" \
-    || { echo "[bootstrap] static ffmpeg failed — trying imageio-ffmpeg"; pip install --target "$SITE" imageio-ffmpeg 2>&1 | tail -1; python -c "import imageio_ffmpeg,shutil; shutil.copy(imageio_ffmpeg.get_ffmpeg_exe(), '$VOL/bin/ffmpeg')" && chmod +x "$VOL/bin/ffmpeg"; }
+# apt is not usable in the serverless container. ffmpeg: imageio-ffmpeg's bundled static binary (pip is proven here),
+# verified by ELF magic; the johnvansickle static build is the fallback.
+export PATH="$VOL/bin:$PATH"; mkdir -p "$VOL/bin"
+is_elf() { [ -s "$1" ] && [ "$(head -c 4 "$1" | od -An -c | tr -d ' \n')" = "177ELF" ]; }
+if ! is_elf "$VOL/bin/ffmpeg"; then
+  rm -f "$VOL/bin/ffmpeg"; echo "[bootstrap] installing ffmpeg via imageio-ffmpeg"
+  pip install --target "$SITE" imageio-ffmpeg 2>&1 | tail -1
+  python -c "import imageio_ffmpeg, shutil; p=imageio_ffmpeg.get_ffmpeg_exe(); shutil.copy(p, '$VOL/bin/ffmpeg'); print('[bootstrap] ffmpeg from', p)" || true
+  chmod +x "$VOL/bin/ffmpeg" 2>/dev/null
+  if ! is_elf "$VOL/bin/ffmpeg"; then
+    echo "[bootstrap] imageio-ffmpeg failed — static build"; mkdir -p /tmp/ff && curl -sfL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o /tmp/ff/ff.tar.xz \
+      && tar -xJf /tmp/ff/ff.tar.xz -C /tmp/ff && cp /tmp/ff/ffmpeg-*-static/ffmpeg "$VOL/bin/ffmpeg" && chmod +x "$VOL/bin/ffmpeg"
+  fi
 fi
+is_elf "$VOL/bin/ffmpeg" && echo "[bootstrap] ffmpeg OK: $("$VOL/bin/ffmpeg" -version 2>&1 | head -1)" || echo "[bootstrap] WARNING: no working ffmpeg"
 command -v git >/dev/null || echo "[bootstrap] WARNING: git missing"
 
 if [ ! -d "$SRC/.git" ]; then git clone --depth 1 https://github.com/Omni-Avatar/OmniAvatar.git "$SRC" || { echo "[bootstrap] clone failed"; sleep 30; exit 1; }; fi

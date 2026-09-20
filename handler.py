@@ -24,6 +24,11 @@ DEFAULT_PROMPT = ("A confident instructor in a dark shirt standing in front of a
 
 def run(job):
     i = job["input"]
+    if i.get("action") == "diag":
+        def sh(c): return subprocess.run(c, shell=True, capture_output=True, text=True).stdout[-1500:]
+        return {"ls_vol": sh("ls -la /runpod-volume/omniavatar /runpod-volume/omniavatar/bin 2>&1"), "ffmpeg_magic": sh("head -c 4 /runpod-volume/omniavatar/bin/ffmpeg | od -An -c; file /runpod-volume/omniavatar/bin/ffmpeg 2>&1"),
+                "which": sh("which ffmpeg python; python -V; echo $PATH; nvidia-smi --query-gpu=name,memory.total --format=csv,noheader"), "bootstrap_head": sh("head -20 /tmp/bootstrap.sh 2>&1"),
+                "log_tail": sh("tail -40 /runpod-volume/omniavatar/bootstrap.log 2>&1"), "models": sh("ls /runpod-volume/omniavatar/pretrained_models 2>&1; du -sh /runpod-volume/omniavatar/* 2>&1")}
     if i.get("action") == "log":
         try: return {"log": open("/runpod-volume/omniavatar/bootstrap.log").read()[-6000:]}
         except Exception as e: return {"error": str(e)}
