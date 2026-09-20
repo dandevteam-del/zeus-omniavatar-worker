@@ -8,7 +8,7 @@ MODEL="${OMNIAVATAR_MODEL:-1.3B}"
 mkdir -p "$VOL" "$PM" "$SITE" /runpod-volume/hf /runpod-volume/tmp
 exec > >(tee -a "$LOG" /tmp/bootstrap.local.log) 2>&1
 echo "=== bootstrap $(date -u +%FT%TZ) model=$MODEL host=$(hostname) gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null)"
-export HF_HOME=/runpod-volume/hf TMPDIR=/runpod-volume/tmp PYTHONPATH="$SITE:${PYTHONPATH:-}" PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
+export HF_HOME=/runpod-volume/hf TMPDIR=/tmp PYTHONPATH="$SITE:${PYTHONPATH:-}" PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
 # apt is not usable in the serverless container, and copying a binary onto the network volume produced a 0-byte file.
 # ffmpeg comes from the imageio-ffmpeg wheel (already in $SITE) and is used IN PLACE; a symlink puts it on PATH.
 export PATH="$VOL/bin:$PATH"; mkdir -p "$VOL/bin"
@@ -33,6 +33,8 @@ dl facebook/wav2vec2-base-960h "$PM/wav2vec2-base-960h" config.json
 if [ "$MODEL" = "14B" ]; then dl Wan-AI/Wan2.1-T2V-14B "$PM/Wan2.1-T2V-14B" config.json; dl OmniAvatar/OmniAvatar-14B "$PM/OmniAvatar-14B" config.json
 else dl Wan-AI/Wan2.1-T2V-1.3B "$PM/Wan2.1-T2V-1.3B" config.json; dl OmniAvatar/OmniAvatar-1.3B "$PM/OmniAvatar-1.3B" config.json; fi
 ln -sfn "$PM" "$SRC/pretrained_models"
+# the HF hub cache duplicates the --local-dir weights; the 50 GB volume filled up (0-byte files, blank log). Drop it.
+rm -rf /runpod-volume/hf/hub /runpod-volume/tmp/* 2>/dev/null; echo "[bootstrap] volume: $(df -h /runpod-volume | tail -1)"
 cd "$SRC"
 curl -sfL "https://raw.githubusercontent.com/dandevteam-del/zeus-omniavatar-worker/${BOOT_SHA:-main}/handler.py" -o /tmp/handler.py || { echo "[bootstrap] handler fetch failed"; sleep 30; exit 1; }
 python -c "import runpod, torch; print('[bootstrap] runpod', runpod.__version__, 'torch', torch.__version__, 'cuda', torch.cuda.is_available())" || { echo "[bootstrap] import check failed"; sleep 30; exit 1; }

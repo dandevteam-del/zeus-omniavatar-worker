@@ -38,11 +38,11 @@ def run(job):
         def sh(c): return subprocess.run(c, shell=True, capture_output=True, text=True).stdout[-1500:]
         return {"ls_vol": sh("ls -la /runpod-volume/omniavatar /runpod-volume/omniavatar/bin 2>&1"), "ffmpeg_magic": sh("head -c 4 /runpod-volume/omniavatar/bin/ffmpeg | od -An -c; file /runpod-volume/omniavatar/bin/ffmpeg 2>&1"),
                 "which": sh("which ffmpeg python; python -V; echo $PATH; nvidia-smi --query-gpu=name,memory.total --format=csv,noheader"), "bootstrap_head": sh("head -20 /tmp/bootstrap.sh 2>&1"),
-                "log_tail": sh("tail -40 /tmp/bootstrap.local.log 2>&1"), "ffmpeg": FFMPEG + " " + str(os.path.getsize(FFMPEG) if os.path.exists(FFMPEG) else -1), "models": sh("ls /runpod-volume/omniavatar/pretrained_models 2>&1; du -sh /runpod-volume/omniavatar/* 2>&1")}
+                "log_tail": sh("tail -40 /tmp/bootstrap.local.log 2>&1"), "ffmpeg": FFMPEG + " " + str(os.path.getsize(FFMPEG) if os.path.exists(FFMPEG) else -1), "models": sh("ls /runpod-volume/omniavatar/pretrained_models 2>&1; du -sh /runpod-volume/* 2>&1; df -h /runpod-volume /tmp 2>&1")}
     if i.get("action") == "log":
         try: return {"log": open("/tmp/bootstrap.local.log").read()[-6000:]}
         except Exception as e: return {"error": str(e)}
-    jid = uuid.uuid4().hex[:8]; work = f"/runpod-volume/tmp/{jid}"; os.makedirs(work, exist_ok=True)
+    jid = uuid.uuid4().hex[:8]; work = f"/tmp/omni/{jid}"          # container disk — the network volume ran out of space; os.makedirs(work, exist_ok=True)
     img, wav = f"{work}/ref.png", f"{work}/vo.wav"
     open(img, "wb").write(base64.b64decode(i["image_b64"])); open(wav, "wb").write(base64.b64decode(i["audio_b64"]))
     subprocess.run([FFMPEG, "-nostdin", "-loglevel", "error", "-y", "-i", wav, "-ac", "1", "-ar", "16000", f"{work}/vo16.wav"], check=True)
