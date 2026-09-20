@@ -6,24 +6,16 @@
 VOL=/runpod-volume/omniavatar; SRC=$VOL/src; PM=$VOL/pretrained_models; SITE=$VOL/site; LOG=$VOL/bootstrap.log
 MODEL="${OMNIAVATAR_MODEL:-1.3B}"
 mkdir -p "$VOL" "$PM" "$SITE" /runpod-volume/hf /runpod-volume/tmp
-exec > >(tee -a "$LOG") 2>&1
+exec > >(tee -a "$LOG" /tmp/bootstrap.local.log) 2>&1
 echo "=== bootstrap $(date -u +%FT%TZ) model=$MODEL host=$(hostname) gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null)"
 export HF_HOME=/runpod-volume/hf TMPDIR=/runpod-volume/tmp PYTHONPATH="$SITE:${PYTHONPATH:-}" PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
-# apt is not usable in the serverless container. ffmpeg: imageio-ffmpeg's bundled static binary (pip is proven here),
-# verified by ELF magic; the johnvansickle static build is the fallback.
+# apt is not usable in the serverless container, and copying a binary onto the network volume produced a 0-byte file.
+# ffmpeg comes from the imageio-ffmpeg wheel (already in $SITE) and is used IN PLACE; a symlink puts it on PATH.
 export PATH="$VOL/bin:$PATH"; mkdir -p "$VOL/bin"
-is_elf() { [ -s "$1" ] && [ "$(head -c 4 "$1" | od -An -c | tr -d ' \n')" = "177ELF" ]; }
-if ! is_elf "$VOL/bin/ffmpeg"; then
-  rm -f "$VOL/bin/ffmpeg"; echo "[bootstrap] installing ffmpeg via imageio-ffmpeg"
-  pip install --target "$SITE" imageio-ffmpeg 2>&1 | tail -1
-  python -c "import imageio_ffmpeg, shutil; p=imageio_ffmpeg.get_ffmpeg_exe(); shutil.copy(p, '$VOL/bin/ffmpeg'); print('[bootstrap] ffmpeg from', p)" || true
-  chmod +x "$VOL/bin/ffmpeg" 2>/dev/null
-  if ! is_elf "$VOL/bin/ffmpeg"; then
-    echo "[bootstrap] imageio-ffmpeg failed — static build"; mkdir -p /tmp/ff && curl -sfL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o /tmp/ff/ff.tar.xz \
-      && tar -xJf /tmp/ff/ff.tar.xz -C /tmp/ff && cp /tmp/ff/ffmpeg-*-static/ffmpeg "$VOL/bin/ffmpeg" && chmod +x "$VOL/bin/ffmpeg"
-  fi
-fi
-is_elf "$VOL/bin/ffmpeg" && echo "[bootstrap] ffmpeg OK: $("$VOL/bin/ffmpeg" -version 2>&1 | head -1)" || echo "[bootstrap] WARNING: no working ffmpeg"
+python -c "import imageio_ffmpeg" 2>/dev/null || pip install --target "$SITE" imageio-ffmpeg 2>&1 | tail -1
+FF=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())" 2>/dev/null)
+if [ -n "$FF" ] && [ -s "$FF" ]; then rm -f "$VOL/bin/ffmpeg" "$VOL/bin/ffprobe"; ln -s "$FF" "$VOL/bin/ffmpeg"; echo "[bootstrap] ffmpeg → $FF ($("$FF" -version 2>&1 | head -1))"
+else echo "[bootstrap] WARNING: imageio-ffmpeg has no binary"; fi
 command -v git >/dev/null || echo "[bootstrap] WARNING: git missing"
 
 if [ ! -d "$SRC/.git" ]; then git clone --depth 1 https://github.com/Omni-Avatar/OmniAvatar.git "$SRC" || { echo "[bootstrap] clone failed"; sleep 30; exit 1; }; fi
